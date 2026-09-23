@@ -1,4 +1,4 @@
-name: Build Rawdah APK
+Name: Build Rawdah APK
 
 on:
   push:
@@ -29,11 +29,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create android project if missing
+      - name: Regenerate android project
         run: |
-          if [ ! -d android ]; then
-            flutter create . --platforms=android --org com.azzoom --project-name rawdah
-          fi
+          rm -rf android
+          flutter create . --platforms=android --org com.azzoom --project-name rawdah
 
       - name: Ensure assets exist
         run: |
@@ -68,3 +67,4 @@ jobs:
         with:
           name: rawdah-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
