@@ -1,4 +1,4 @@
-Name: Build Rawdah APK
+name: Build Rawdah APK
 
 on:
   push:
@@ -67,4 +67,4 @@ jobs:
         with:
           name: rawdah-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-
+          
