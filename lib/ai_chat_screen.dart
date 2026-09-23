@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'colors.dart';
 
-/// لا مفاتيح داخل التطبيق. مرّر عنوان الخادم الوسيط عند البناء فقط:
-/// flutter build apk --dart-define=AI_PROXY_URL=https://your-server.com/chat
-/// الخادم هو من يحتفظ بمفتاح Groq ويضع حدّاً للطلبات. الطلب: {"message": "..."} والرد: {"reply": "..."}
-const String kProxyUrl = String.fromEnvironment('AI_PROXY_URL');
+const String kAiUrl = 'https://text.pollinations.ai/openai';
+const String kSystem =
+    'أنت "روضة"، مساعد إسلامي. أجب بالعربية الفصحى وبأدب وإيجاز. '
+    'التزم بما اتفق عليه أهل السنة والجماعة، واذكر الخلاف الفقهي المعتبر عند وجوده دون ترجيح جازم. '
+    'لا تُصدر فتاوى، وانصح بالرجوع لأهل العلم في المسائل الدقيقة. لا تختلق آيات أو أحاديث، '
+    'وإن لم تتأكد فقل ذلك صراحة.';
 
 class _Msg {
   final String text;
@@ -30,35 +32,42 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   static const _kb = <List<dynamic>>[
     [['وضوء', 'الوضوء'], 'الوضوء: النية، ثم غسل الكفين، فالمضمضة والاستنشاق، فغسل الوجه، فاليدين إلى المرفقين، فمسح الرأس والأذنين، فغسل الرجلين إلى الكعبين، مع الترتيب والموالاة.'],
-    [['صلاة', 'الصلاة', 'صلوات'], 'الصلوات المفروضة خمس: الفجر (ركعتان)، الظهر (4)، العصر (4)، المغرب (3)، العشاء (4). وتجد مواقيتها الدقيقة في شاشة الصلاة.'],
-    [['زكاة', 'الزكاة'], 'زكاة المال ربع العشر (2.5%) إذا بلغ النصاب ومرّ عليه حول هجري كامل. ويختلف تقدير النصاب حسب سعر الذهب، فراجع جهة الإفتاء في بلدك.'],
-    [['صيام', 'صوم', 'رمضان'], 'صيام رمضان فرض على كل مسلم بالغ عاقل قادر، ويبدأ من طلوع الفجر الصادق إلى غروب الشمس مع النية. وللمريض والمسافر الرخصة مع القضاء.'],
+    [['صلاة', 'الصلاة', 'صلوات'], 'الصلوات المفروضة خمس: الفجر (ركعتان)، الظهر (4)، العصر (4)، المغرب (3)، العشاء (4).'],
+    [['زكاة', 'الزكاة'], 'زكاة المال ربع العشر (2.5%) إذا بلغ النصاب ومرّ عليه حول هجري كامل. راجع جهة الإفتاء في بلدك لتقدير النصاب.'],
+    [['صيام', 'صوم', 'رمضان'], 'صيام رمضان فرض على كل مسلم بالغ عاقل قادر، من طلوع الفجر الصادق إلى غروب الشمس مع النية. وللمريض والمسافر الرخصة مع القضاء.'],
     [['استخارة'], 'صلاة الاستخارة ركعتان من غير الفريضة، ثم دعاء الاستخارة الوارد عن النبي ﷺ، ثم المضيّ فيما ينشرح له الصدر مع الأخذ بالأسباب.'],
-    [['توبة', 'ذنب', 'ذنوب'], 'باب التوبة مفتوح: إقلاع عن الذنب، وندم عليه، وعزم على عدم العودة، ورد الحقوق لأصحابها إن وُجدت. قال تعالى: ﴿إن الله يحب التوابين﴾.'],
+    [['توبة', 'ذنب', 'ذنوب'], 'باب التوبة مفتوح: إقلاع عن الذنب، وندم عليه، وعزم على عدم العودة، ورد الحقوق لأصحابها إن وُجدت.'],
   ];
 
   String _local(String q) {
     for (final e in _kb) {
-      if ((e[0] as List<String>).any(q.contains)) return e[1] as String;
+      if ((e[0] as List).cast<String>().any(q.contains)) return e[1] as String;
     }
-    return 'لم أجد إجابة محددة لسؤالك ضمن معلوماتي المحلية. '
-        'للمسائل الفقهية الدقيقة أنصحك بسؤال أهل العلم الموثوقين أو دار الإفتاء في بلدك.';
+    return 'الخدمة الذكية غير متاحة الآن ولم أجد إجابة محلية لسؤالك. '
+        'للمسائل الفقهية أنصحك بسؤال أهل العلم الموثوقين.';
   }
 
   Future<String> _answer(String q) async {
-    if (kProxyUrl.isNotEmpty) {
-      try {
-        final r = await http
-            .post(Uri.parse(kProxyUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({'message': q}))
-            .timeout(const Duration(seconds: 20));
-        if (r.statusCode == 200) {
-          final reply = jsonDecode(utf8.decode(r.bodyBytes))['reply'];
-          if (reply is String && reply.trim().isNotEmpty) return reply;
-        }
-      } catch (_) {/* ننتقل للمعالج المحلي */}
-    }
+    try {
+      final history = _msgs.length > 7 ? _msgs.sublist(_msgs.length - 7) : _msgs;
+      final r = await http
+          .post(Uri.parse(kAiUrl),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'model': 'openai',
+                'private': true,
+                'messages': [
+                  {'role': 'system', 'content': kSystem},
+                  for (final m in history)
+                    {'role': m.user ? 'user' : 'assistant', 'content': m.text},
+                ],
+              }))
+          .timeout(const Duration(seconds: 30));
+      if (r.statusCode == 200) {
+        final reply = jsonDecode(utf8.decode(r.bodyBytes))['choices'][0]['message']['content'];
+        if (reply is String && reply.trim().isNotEmpty) return reply.trim();
+      }
+    } catch (_) {}
     return _local(q);
   }
 
@@ -109,14 +118,13 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     padding: const EdgeInsets.all(12),
-                    constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.8),
+                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
                     decoration: BoxDecoration(
                       color: m.user ? C.navy : C.card,
                       borderRadius: BorderRadius.circular(16),
                       border: m.user ? Border.all(color: C.gold, width: 0.8) : null,
                     ),
-                    child: Text(m.text, style: const TextStyle(height: 1.6)),
+                    child: SelectableText(m.text, style: const TextStyle(height: 1.6)),
                   ),
                 );
               },
@@ -136,16 +144,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       filled: true,
                       fillColor: C.card,
                       border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                     ),
                   ),
                 ),
                 const SizedBox(width: 6),
                 CircleAvatar(
                   backgroundColor: C.gold,
-                  child: IconButton(
-                      icon: const Icon(Icons.send, color: C.bg), onPressed: _send),
+                  child: IconButton(icon: const Icon(Icons.send, color: C.bg), onPressed: _send),
                 ),
               ]),
             ),
