@@ -1,0 +1,70 @@
+name: Build Rawdah APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+          cache: true
+
+      - name: Create android project if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create . --platforms=android --org com.azzoom --project-name rawdah
+          fi
+
+      - name: Ensure assets exist
+        run: |
+          mkdir -p assets/videos assets/data
+          [ -f assets/data/messages.json ] || echo '["قال تعالى: ﴿ألا بذكر الله تطمئن القلوب﴾"]' > assets/data/messages.json
+          [ -f assets/videos/welcome.mp4 ] || touch assets/videos/welcome.mp4
+
+      - name: Remove unused adhan package
+        run: sed -i '/^\s*adhan:/d' pubspec.yaml
+
+      - name: Add Android permissions
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          for P in INTERNET ACCESS_NETWORK_STATE ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION VIBRATE; do
+            if ! grep -q "android.permission.$P" $M; then
+              sed -i "0,/<application/s//<uses-permission android:name=\"android.permission.$P\"\/>\n    <application/" $M
+            fi
+          done
+          if ! grep -q "<queries>" $M; then
+            sed -i 's#</manifest>#    <queries><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries>\n</manifest>#' $M
+          fi
+          cat $M
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rawdah-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
