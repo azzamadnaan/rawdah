@@ -29,6 +29,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
   _St _st = _St.loading;
   Map<String, String> _today = {}, _tomorrow = {};
   String _method = '';
+  String _city = '';
   int _loadedDay = 0;
   DateTime _now = DateTime.now();
   Timer? _timer;
@@ -52,7 +53,34 @@ class _PrayerScreenState extends State<PrayerScreen> {
 
   String _two(int n) => n.toString().padLeft(2, '0');
 
-  /// يجلب المواقيت من واجهة أذان ويحفظها للعمل بدون إنترنت.
+  /// اسم المدينة الفعلي من إحداثيات المستخدم (خدمة مجانية بدون مفتاح).
+  Future<String> _cityName(double lat, double lng, SharedPreferences prefs) async {
+    final key = 'city_${lat.toStringAsFixed(2)}_${lng.toStringAsFixed(2)}';
+    try {
+      final r = await http.get(Uri.parse(
+              'https://api.bigdatacloud.net/data/reverse-geocode-client'
+              '?latitude=$lat&longitude=$lng&localityLanguage=ar'))
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode == 200) {
+        final j = jsonDecode(utf8.decode(r.bodyBytes));
+        final parts = <String>[
+          for (final k in ['city', 'locality', 'principalSubdivision', 'countryName'])
+            if ((j[k] ?? '').toString().trim().isNotEmpty) j[k].toString().trim()
+        ];
+        final uniq = <String>[];
+        for (final p in parts) {
+          if (!uniq.contains(p)) uniq.add(p);
+        }
+        if (uniq.isNotEmpty) {
+          final s = uniq.take(3).join('، ');
+          await prefs.setString(key, s);
+          return s;
+        }
+      }
+    } catch (_) {}
+    return prefs.getString(key) ?? '';
+  }
+
   Future<Map<String, String>?> _fetch(
       DateTime d, double lat, double lng, SharedPreferences prefs) async {
     final ds = '${_two(d.day)}-${_two(d.month)}-${d.year}';
@@ -106,7 +134,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
 
     double? lat = p?.latitude, lng = p?.longitude;
     if (lat == null || lng == null) {
-      lat = prefs.getDouble('lat'); // آخر موقع حقيقي للمستخدم
+      lat = prefs.getDouble('lat');
       lng = prefs.getDouble('lng');
     } else {
       await prefs.setDouble('lat', lat);
@@ -120,6 +148,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
     final today = await _fetch(DateTime.now(), lat, lng, prefs);
     final tom = await _fetch(
         DateTime.now().add(const Duration(days: 1)), lat, lng, prefs);
+    final city = await _cityName(lat, lng, prefs);
     if (!mounted) return;
     if (today == null) {
       setState(() => _st = _St.error);
@@ -129,6 +158,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
       _today = today;
       _tomorrow = tom ?? today;
       _method = today['_method'] ?? '';
+      _city = city;
       _loadedDay = DateTime.now().day;
       _st = _St.ready;
     });
@@ -242,13 +272,16 @@ class _PrayerScreenState extends State<PrayerScreen> {
           Center(
               child: Text(_hms(_now),
                   style: const TextStyle(
-                      fontSize: 44,
-                      color: C.gold,
-                      fontWeight: FontWeight.bold))),
+                      fontSize: 44, color: C.gold, fontWeight: FontWeight.bold))),
           Center(
-              child: Text('حسب موقعك الحالي • $_method',
+              child: Text(
+                  _city.isEmpty ? 'حسب موقعك الحالي' : '📍 $_city',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12))),
+                  style: const TextStyle(color: C.white, fontSize: 15))),
+          Center(
+              child: Text('طريقة الحساب: $_method',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11))),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(20),
@@ -262,9 +295,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
               const SizedBox(height: 8),
               Text(cd,
                   style: const TextStyle(
-                      fontSize: 40,
-                      color: C.gold,
-                      fontWeight: FontWeight.bold)),
+                      fontSize: 40, color: C.gold, fontWeight: FontWeight.bold)),
               Text('عند ${_hm(nextTime)}',
                   style: const TextStyle(color: Colors.white70)),
             ]),
@@ -296,13 +327,11 @@ class _PrayerScreenState extends State<PrayerScreen> {
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   ActionChip(
-                      avatar: const Icon(Icons.camera_alt,
-                          color: C.gold, size: 18),
+                      avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
                       label: const Text('منصة روضة @hii0i5'),
                       onPressed: () => _open('hii0i5')),
                   ActionChip(
-                      avatar: const Icon(Icons.camera_alt,
-                          color: C.gold, size: 18),
+                      avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
                       label: const Text('المطوّر @az_zoom_'),
                       onPressed: () => _open('az_zoom_')),
                 ]),
