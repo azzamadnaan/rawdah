@@ -10,8 +10,12 @@ import 'colors.dart';
 enum _St { loading, needPermission, needGps, error, ready }
 
 const _names = {
-  'Fajr': 'الفجر', 'Sunrise': 'الشروق', 'Dhuhr': 'الظهر',
-  'Asr': 'العصر', 'Maghrib': 'المغرب', 'Isha': 'العشاء',
+  'Fajr': 'الفجر',
+  'Sunrise': 'الشروق',
+  'Dhuhr': 'الظهر',
+  'Asr': 'العصر',
+  'Maghrib': 'المغرب',
+  'Isha': 'العشاء',
 };
 const _prayers = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
@@ -48,7 +52,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
 
   String _two(int n) => n.toString().padLeft(2, '0');
 
-  /// يجلب المواقيت من واجهة أذان، ويحفظها للعمل بدون إنترنت.
+  /// يجلب المواقيت من واجهة أذان ويحفظها للعمل بدون إنترنت.
   Future<Map<String, String>?> _fetch(
       DateTime d, double lat, double lng, SharedPreferences prefs) async {
     final ds = '${_two(d.day)}-${_two(d.month)}-${d.year}';
@@ -61,7 +65,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
       if (r.statusCode == 200) {
         final data = jsonDecode(r.body)['data'];
         final t = Map<String, dynamic>.from(data['timings']);
-        final out = {
+        final out = <String, String>{
           for (final k in _names.keys) k: t[k].toString().substring(0, 5),
           '_method': data['meta']['method']['name'].toString(),
         };
@@ -74,7 +78,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _st = _St.loading);
+    if (mounted) setState(() => _st = _St.loading);
     final prefs = await SharedPreferences.getInstance();
     Position? p;
     _St? fail;
@@ -92,9 +96,8 @@ class _PrayerScreenState extends State<PrayerScreen> {
       } else {
         try {
           p = await Geolocator.getCurrentPosition(
-              locationSettings: const LocationSettings(
-                  accuracy: LocationAccuracy.medium,
-                  timeLimit: Duration(seconds: 20)));
+              desiredAccuracy: LocationAccuracy.medium,
+              timeLimit: const Duration(seconds: 20));
         } catch (_) {
           fail = _St.error;
         }
@@ -102,12 +105,12 @@ class _PrayerScreenState extends State<PrayerScreen> {
     }
 
     double? lat = p?.latitude, lng = p?.longitude;
-    if (lat == null) {
-      lat = prefs.getDouble('lat'); // آخر موقع حقيقي للمستخدم (وليس مكة)
+    if (lat == null || lng == null) {
+      lat = prefs.getDouble('lat'); // آخر موقع حقيقي للمستخدم
       lng = prefs.getDouble('lng');
     } else {
       await prefs.setDouble('lat', lat);
-      await prefs.setDouble('lng', lng!);
+      await prefs.setDouble('lng', lng);
     }
     if (lat == null || lng == null) {
       if (mounted) setState(() => _st = fail ?? _St.error);
@@ -115,9 +118,13 @@ class _PrayerScreenState extends State<PrayerScreen> {
     }
 
     final today = await _fetch(DateTime.now(), lat, lng, prefs);
-    final tom = await _fetch(DateTime.now().add(const Duration(days: 1)), lat, lng, prefs);
+    final tom = await _fetch(
+        DateTime.now().add(const Duration(days: 1)), lat, lng, prefs);
     if (!mounted) return;
-    if (today == null) return setState(() => _st = _St.error);
+    if (today == null) {
+      setState(() => _st = _St.error);
+      return;
+    }
     setState(() {
       _today = today;
       _tomorrow = tom ?? today;
@@ -132,7 +139,9 @@ class _PrayerScreenState extends State<PrayerScreen> {
     return DateTime(d.year, d.month, d.day, int.parse(p[0]), int.parse(p[1]));
   }
 
-  String _hms(DateTime d) => '${_two(d.hour)}:${_two(d.minute)}:${_two(d.second)}';
+  String _hms(DateTime d) =>
+      '${_two(d.hour)}:${_two(d.minute)}:${_two(d.second)}';
+
   String _hm(DateTime d) {
     final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
     return '$h:${_two(d.minute)} ${d.hour >= 12 ? 'م' : 'ص'}';
@@ -179,12 +188,18 @@ class _PrayerScreenState extends State<PrayerScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Icon(Icons.location_on, color: C.gold, size: 64),
           const SizedBox(height: 12),
-          Text(msg, textAlign: TextAlign.center, style: const TextStyle(fontSize: 17)),
+          Text(msg,
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 17)),
           const SizedBox(height: 16),
           ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: C.gold, foregroundColor: C.bg),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: C.gold, foregroundColor: C.bg),
               onPressed: action,
               child: Text(btn)),
+          const SizedBox(height: 24),
+          const Text(kRights,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white54, fontSize: 12)),
         ]),
       ),
     );
@@ -199,9 +214,12 @@ class _PrayerScreenState extends State<PrayerScreen> {
   }
 
   Widget _ready() {
-    final list = [for (final k in _names.keys) MapEntry(k, _dt(_now, _today[k]!))];
+    final list = [
+      for (final k in _names.keys) MapEntry(k, _dt(_now, _today[k]!))
+    ];
     String nextKey = 'Fajr';
-    DateTime nextTime = _dt(_now.add(const Duration(days: 1)), _tomorrow['Fajr']!);
+    DateTime nextTime =
+        _dt(_now.add(const Duration(days: 1)), _tomorrow['Fajr']!);
     for (final k in _prayers) {
       final t = _dt(_now, _today[k]!);
       if (t.isAfter(_now)) {
@@ -211,7 +229,8 @@ class _PrayerScreenState extends State<PrayerScreen> {
       }
     }
     final diff = nextTime.difference(_now);
-    final cd = '${_two(diff.inHours)}:${_two(diff.inMinutes % 60)}:${_two(diff.inSeconds % 60)}';
+    final cd =
+        '${_two(diff.inHours)}:${_two(diff.inMinutes % 60)}:${_two(diff.inSeconds % 60)}';
 
     return RefreshIndicator(
       color: C.gold,
@@ -222,7 +241,10 @@ class _PrayerScreenState extends State<PrayerScreen> {
         children: [
           Center(
               child: Text(_hms(_now),
-                  style: const TextStyle(fontSize: 44, color: C.gold, fontWeight: FontWeight.bold))),
+                  style: const TextStyle(
+                      fontSize: 44,
+                      color: C.gold,
+                      fontWeight: FontWeight.bold))),
           Center(
               child: Text('حسب موقعك الحالي • $_method',
                   textAlign: TextAlign.center,
@@ -239,8 +261,12 @@ class _PrayerScreenState extends State<PrayerScreen> {
                   style: const TextStyle(fontSize: 18, color: C.white)),
               const SizedBox(height: 8),
               Text(cd,
-                  style: const TextStyle(fontSize: 40, color: C.gold, fontWeight: FontWeight.bold)),
-              Text('عند ${_hm(nextTime)}', style: const TextStyle(color: Colors.white70)),
+                  style: const TextStyle(
+                      fontSize: 40,
+                      color: C.gold,
+                      fontWeight: FontWeight.bold)),
+              Text('عند ${_hm(nextTime)}',
+                  style: const TextStyle(color: Colors.white70)),
             ]),
           ),
           const SizedBox(height: 14),
@@ -249,11 +275,14 @@ class _PrayerScreenState extends State<PrayerScreen> {
             return Card(
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: isNext ? C.gold : Colors.transparent, width: 1.2)),
+                  side: BorderSide(
+                      color: isNext ? C.gold : Colors.transparent, width: 1.2)),
               child: ListTile(
-                leading: Icon(Icons.access_time, color: isNext ? C.gold : Colors.white54),
+                leading: Icon(Icons.access_time,
+                    color: isNext ? C.gold : Colors.white54),
                 title: Text(_names[e.key]!, style: const TextStyle(fontSize: 18)),
-                trailing: Text(_hm(e.value), style: const TextStyle(color: C.gold, fontSize: 17)),
+                trailing: Text(_hm(e.value),
+                    style: const TextStyle(color: C.gold, fontSize: 17)),
               ),
             );
           }),
@@ -262,15 +291,18 @@ class _PrayerScreenState extends State<PrayerScreen> {
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(children: [
-                const Text('تواصل معنا', style: TextStyle(color: C.gold, fontSize: 16)),
+                const Text('تواصل معنا',
+                    style: TextStyle(color: C.gold, fontSize: 16)),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   ActionChip(
-                      avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
+                      avatar: const Icon(Icons.camera_alt,
+                          color: C.gold, size: 18),
                       label: const Text('منصة روضة @hii0i5'),
                       onPressed: () => _open('hii0i5')),
                   ActionChip(
-                      avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
+                      avatar: const Icon(Icons.camera_alt,
+                          color: C.gold, size: 18),
                       label: const Text('المطوّر @az_zoom_'),
                       onPressed: () => _open('az_zoom_')),
                 ]),
