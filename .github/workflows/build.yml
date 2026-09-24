@@ -41,12 +41,10 @@ jobs:
 
       - name: Set SDK versions (safe, no afterEvaluate)
         run: |
-          # app module
           f=android/app/build.gradle
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' $f
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 34/' $f
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/' $f
-          # plugins: set compileSdk when the library plugin is applied (not afterEvaluate)
           cat >> android/build.gradle <<'EOF'
 
           subprojects {
@@ -60,7 +58,7 @@ jobs:
           }
           EOF
 
-      - name: Add Manifest permissions
+      - name: Add Manifest permissions and app name
         run: |
           python3 - <<'EOF'
           p = "android/app/src/main/AndroidManifest.xml"
@@ -76,14 +74,37 @@ jobs:
           if "ACCESS_FINE_LOCATION" not in s:
               i = s.index(">", s.index("<manifest")) + 1
               s = s[:i] + perms + s[i:]
-              open(p, "w", encoding="utf-8").write(s)
+          s = s.replace('android:label="rawdah"', 'android:label="روضة"')
+          if "<queries>" not in s:
+              s = s.replace("</manifest>", '<queries><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries></manifest>')
+          open(p, "w", encoding="utf-8").write(s)
           EOF
+
+      - name: Ensure assets exist
+        run: |
+          mkdir -p assets/videos assets/data
+          [ -f assets/data/messages.json ] || echo '["قال تعالى: ﴿ألا بذكر الله تطمئن القلوب﴾"]' > assets/data/messages.json
+          [ -f assets/videos/welcome.mp4 ] || touch assets/videos/welcome.mp4
 
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Generate app icon
+        run: |
+          if [ -f assets/icon/icon.png ]; then
+            dart run flutter_launcher_icons
+          else
+            echo "No icon found, using default"
+          fi
+
       - name: Build APK
-        run: flutter build apk --release
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_BASE_URL: ${{ vars.GEMINI_BASE_URL }}
+        run: >
+          flutter build apk --release
+          --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY"
+          --dart-define=GEMINI_BASE_URL="$GEMINI_BASE_URL"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
