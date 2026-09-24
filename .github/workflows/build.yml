@@ -2,68 +2,84 @@ name: Build Rawdah APK
 
 on:
   push:
-  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: Setup Flutter 3.24.5
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: stable
           cache: true
 
-      - name: Regenerate android project & Safe Gradle Fix
+      - name: Regenerate android folder
         run: |
           rm -rf android
-          flutter create . --platforms=android --org com.azzoom --project-name rawdah
-          
-          # الطريقة الآمنة 100% لتعريف المتغيرات لتوافق المكتبات القديمة
-          echo "flutter.compileSdkVersion=34" >> android/local.properties
-          echo "flutter.minSdkVersion=21" >> android/local.properties
-          echo "flutter.targetSdkVersion=34" >> android/local.properties
-          
-          # حقن المتغيرات بأمان داخل الجذر لتجنب خطأ التقييم المتأخر
-          sed -i '/allprojects {/a \    ext.compileSdkVersion = 34\n    ext.minSdkVersion = 21\n    ext.targetSdkVersion = 34' android/build.gradle
+          flutter create . --platforms=android --project-name rawdah --org com.rawdah
 
-      - name: Ensure assets exist
+      - name: Pin geolocator_android to a compatible version
         run: |
-          mkdir -p assets/videos assets/data
-          [ -f assets/data/messages.json ] || echo '["قال تعالى: ﴿ألا بذكر الله تطمئن القلوب﴾"]' > assets/data/messages.json
-          [ -f assets/videos/welcome.mp4 ] || touch assets/videos/welcome.mp4
-
-      - name: Remove unused adhan package
-        run: sed -i '/^\s*adhan:/d' pubspec.yaml
-
-      - name: Add Android permissions
-        run: |
-          M=android/app/src/main/AndroidManifest.xml
-          for P in INTERNET ACCESS_NETWORK_STATE ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION VIBRATE; do
-            if ! grep -q "android.permission.$P" $M; then
-              sed -i "0,/<application/s//<uses-permission android:name=\"android.permission.$P\"\/>\n    <application/" $M
-            fi
-          done
-          if ! grep -q "<queries>" $M; then
-            sed -i 's#</manifest>#    <queries><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries>\n</manifest>#' $M
+          if grep -q '^dependency_overrides:' pubspec.yaml; then
+            sed -i '/^dependency_overrides:/a\  geolocator_android: 4.6.1' pubspec.yaml
+          else
+            printf '\ndependency_overrides:\n  geolocator_android: 4.6.1\n' >> pubspec.yaml
           fi
 
-      - name: Install dependencies
+      - name: Set SDK versions (safe, no afterEvaluate)
+        run: |
+          # app module
+          f=android/app/build.gradle
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' $f
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 34/' $f
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/' $f
+          # plugins: set compileSdk when the library plugin is applied (not afterEvaluate)
+          cat >> android/build.gradle <<'EOF'
+
+          subprojects {
+              plugins.withId("com.android.library") {
+                  extensions.configure(com.android.build.gradle.LibraryExtension) { ext ->
+                      if (ext.compileSdkVersion == null) {
+                          ext.compileSdkVersion(34)
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Add Manifest permissions
+        run: |
+          python3 - <<'EOF'
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p, encoding="utf-8").read()
+          perms = """
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+          """
+          if "ACCESS_FINE_LOCATION" not in s:
+              i = s.index(">", s.index("<manifest")) + 1
+              s = s[:i] + perms + s[i:]
+              open(p, "w", encoding="utf-8").write(s)
+          EOF
+
+      - name: Get dependencies
         run: flutter pub get
 
       - name: Build APK
@@ -72,6 +88,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: rawdah-apk
+          name: rawdah-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
