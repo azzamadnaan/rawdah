@@ -3,7 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'colors.dart';
 
-const String kAiUrl = 'https://text.pollinations.ai/openai';
+// تُمرَّر عند البناء من GitHub Secrets (لا تكتب المفتاح هنا)
+const String _kKey = String.fromEnvironment('GEMINI_API_KEY');
+const String _kBaseEnv = String.fromEnvironment('GEMINI_BASE_URL');
+const String _kDefaultBase = 'https://generativelanguage.googleapis.com';
+
+String get _base {
+  final b = _kBaseEnv.trim().isEmpty ? _kDefaultBase : _kBaseEnv.trim();
+  return b.endsWith('/') ? b.substring(0, b.length - 1) : b;
+}
+
+// أسماء مستعارة تبقى صالحة عند تحديث Google لإصداراتها
+const _geminiModels = [
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
+];
+
 const String kSystem =
     'أنت "روضة"، مساعد إسلامي. أجب بالعربية الفصحى وبأدب وإيجاز. '
     'التزم بما اتفق عليه أهل السنة والجماعة، واذكر الخلاف الفقهي المعتبر عند وجوده دون ترجيح جازم. '
@@ -13,7 +29,8 @@ const String kSystem =
 class _Msg {
   final String text;
   final bool user;
-  _Msg(this.text, this.user);
+  final String? note; // سبب استخدام الرد المحلي
+  _Msg(this.text, this.user, {this.note});
 }
 
 class AiChatScreen extends StatefulWidget {
@@ -29,6 +46,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
     _Msg('السلام عليكم ورحمة الله وبركاته، أنا روضة. اسألني في أمور دينك وسأجيبك بما أستطيع.', false)
   ];
   bool _busy = false;
+  String _lastError = '';
 
   static const _kb = <List<dynamic>>[
     [['وضوء', 'الوضوء'], 'الوضوء: النية، ثم غسل الكفين، فالمضمضة والاستنشاق، فغسل الوجه، فاليدين إلى المرفقين، فمسح الرأس والأذنين، فغسل الرجلين إلى الكعبين، مع الترتيب والموالاة.'],
@@ -47,28 +65,92 @@ class _AiChatScreenState extends State<AiChatScreen> {
         'للمسائل الفقهية أنصحك بسؤال أهل العلم الموثوقين.';
   }
 
-  Future<String> _answer(String q) async {
+  /// Gemini: يجرّب النماذج بالترتيب.
+  Future<String?> _gemini(List<_Msg> hist) async {
+    final usable = _kKey.isNotEmpty || _kBaseEnv.trim().isNotEmpty;
+    if (!usable) {
+      _lastError = 'المفتاح غير مضبوط في البناء';
+      return null;
+    }
+    // Gemini يشترط أن تبدأ المحادثة برسالة مستخدم
+    final turns = hist.skipWhile((m) => !m.user).toList();
+    final contents = [
+      for (final m in turns)
+        {
+          'role': m.user ? 'user' : 'model',
+          'parts': [
+            {'text': m.text}
+          ]
+        }
+    ];
+    final headers = {
+      'Content-Type': 'application/json',
+      if (_kKey.isNotEmpty) 'x-goog-api-key': _kKey,
+    };
+    final body = jsonEncode({
+      'systemInstruction': {
+        'parts': [
+          {'text': kSystem}
+        ]
+      },
+      'contents': contents,
+      'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 900},
+    });
+
+    for (final model in _geminiModels) {
+      try {
+        final r = await http
+            .post(Uri.parse('$_base/v1beta/models/$model:generateContent'),
+                headers: headers, body: body)
+            .timeout(const Duration(seconds: 30));
+        if (r.statusCode == 200) {
+          final j = jsonDecode(utf8.decode(r.bodyBytes));
+          final parts = j['candidates']?[0]?['content']?['parts'] as List?;
+          final text = parts?.map((p) => p['text'] ?? '').join('').trim() ?? '';
+          if (text.isNotEmpty) return text;
+          _lastError = 'رد فارغ (قد يكون حُجب)';
+        } else {
+          _lastError = 'Gemini ${r.statusCode}';
+          if (r.statusCode == 400 || r.statusCode == 403) break; // مفتاح/منطقة
+        }
+      } catch (e) {
+        _lastError = 'تعذّر الاتصال';
+      }
+    }
+    return null;
+  }
+
+  /// احتياط مفتوح بلا مفتاح
+  Future<String?> _backup(List<_Msg> hist) async {
     try {
-      final history = _msgs.length > 7 ? _msgs.sublist(_msgs.length - 7) : _msgs;
       final r = await http
-          .post(Uri.parse(kAiUrl),
+          .post(Uri.parse('https://gen.pollinations.ai/v1/chat/completions'),
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({
                 'model': 'openai',
                 'private': true,
                 'messages': [
                   {'role': 'system', 'content': kSystem},
-                  for (final m in history)
+                  for (final m in hist)
                     {'role': m.user ? 'user' : 'assistant', 'content': m.text},
                 ],
               }))
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 25));
       if (r.statusCode == 200) {
-        final reply = jsonDecode(utf8.decode(r.bodyBytes))['choices'][0]['message']['content'];
-        if (reply is String && reply.trim().isNotEmpty) return reply.trim();
+        final t = jsonDecode(utf8.decode(r.bodyBytes))['choices'][0]['message']['content'];
+        if (t is String && t.trim().isNotEmpty) return t.trim();
       }
     } catch (_) {}
-    return _local(q);
+    return null;
+  }
+
+  Future<_Msg> _answer(String q) async {
+    final hist = _msgs.length > 9 ? _msgs.sublist(_msgs.length - 9) : List<_Msg>.from(_msgs);
+    final g = await _gemini(hist);
+    if (g != null) return _Msg(g, false);
+    final b = await _backup(hist);
+    if (b != null) return _Msg(b, false);
+    return _Msg(_local(q), false, note: 'إجابة محلية — السبب: $_lastError');
   }
 
   Future<void> _send() async {
@@ -82,7 +164,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
     final a = await _answer(q);
     if (!mounted) return;
     setState(() {
-      _msgs.add(_Msg(a, false));
+      _msgs.add(a);
       _busy = false;
     });
     await Future.delayed(const Duration(milliseconds: 100));
@@ -118,13 +200,22 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     padding: const EdgeInsets.all(12),
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+                    constraints:
+                        BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
                     decoration: BoxDecoration(
                       color: m.user ? C.navy : C.card,
                       borderRadius: BorderRadius.circular(16),
                       border: m.user ? Border.all(color: C.gold, width: 0.8) : null,
                     ),
-                    child: SelectableText(m.text, style: const TextStyle(height: 1.6)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SelectableText(m.text, style: const TextStyle(height: 1.6)),
+                      if (m.note != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text('(${m.note})',
+                              style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                        ),
+                    ]),
                   ),
                 );
               },
@@ -144,7 +235,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       filled: true,
                       fillColor: C.card,
                       border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none),
                     ),
                   ),
                 ),
