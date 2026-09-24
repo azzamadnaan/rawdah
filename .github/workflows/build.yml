@@ -29,12 +29,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Regenerate android project & Fix Gradle Specs
+      - name: Regenerate android project & Fix Gradle Configurations
         run: |
           rm -rf android
           flutter create . --platforms=android --org com.azzoom --project-name rawdah
-          
-          # Fix compileSdk / targetSdk & Naming
+
+          # Update local.properties with SDK location and Flutter properties
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          echo "flutter.sdk=$FLUTTER_ROOT" >> android/local.properties
+          echo "flutter.buildMode=release" >> android/local.properties
+          echo "flutter.versionName=1.0.0" >> android/local.properties
+          echo "flutter.versionCode=1" >> android/local.properties
+          echo "flutter.compileSdkVersion=34" >> android/local.properties
+          echo "flutter.minSdkVersion=21" >> android/local.properties
+          echo "flutter.targetSdkVersion=34" >> android/local.properties
+
+          # Overwrite build.gradle to ensure proper compatibility
           cat << 'EOF' > android/app/build.gradle
           plugins {
               id "com.android.application"
@@ -42,16 +52,43 @@ jobs:
               id "dev.flutter.flutter-gradle-plugin"
           }
 
+          def localProperties = new Properties()
+          def localPropertiesFile = rootProject.file('local.properties')
+          if (localPropertiesFile.exists()) {
+              localPropertiesFile.withReader('UTF-8') { reader ->
+                  localProperties.load(reader)
+              }
+          }
+
+          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+          if (flutterVersionCode == null) {
+              flutterVersionCode = '1'
+          }
+
+          def flutterVersionName = localProperties.getProperty('flutter.versionName')
+          if (flutterVersionName == null) {
+              flutterVersionName = '1.0'
+          }
+
           android {
               namespace "com.azzoom.rawdah"
               compileSdk 34
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
 
               defaultConfig {
                   applicationId "com.azzoom.rawdah"
                   minSdk 21
                   targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+                  versionCode flutterVersionCode.toInteger()
+                  versionName flutterVersionName
               }
 
               buildTypes {
