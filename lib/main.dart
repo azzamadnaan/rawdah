@@ -9,6 +9,8 @@ import 'athkar_screen.dart';
 import 'quran_screen.dart';
 import 'daily_messages_screen.dart';
 
+const _introKey = 'intro_seen_v2';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const RawdahApp());
@@ -32,7 +34,7 @@ class RawdahApp extends StatelessWidget {
       );
 }
 
-/// شاشة البداية: الفيديو يظهر مرة واحدة فقط مع زر تخطي.
+/// الفيديو يظهر مرة واحدة فقط، ولا يُسجَّل كمشاهَد إلا إذا عُرض فعلاً.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -42,6 +44,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   VideoPlayerController? _vc;
   bool _done = false;
+  bool _played = false;
 
   @override
   void initState() {
@@ -51,27 +54,35 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('intro_seen') ?? false) return _finish();
+    if (prefs.getBool(_introKey) ?? false) return _finish(markSeen: false);
     try {
       final vc = VideoPlayerController.asset('assets/videos/welcome.mp4');
-      await vc.initialize();
+      await vc.initialize().timeout(const Duration(seconds: 8));
       vc.addListener(() {
         final v = vc.value;
-        if (v.isInitialized && !v.isPlaying && v.position >= v.duration) _finish();
+        if (v.isInitialized &&
+            v.duration > Duration.zero &&
+            v.position >= v.duration) {
+          _finish(markSeen: true);
+        }
       });
       if (!mounted) return;
       setState(() => _vc = vc);
+      _played = true;
       await vc.play();
     } catch (_) {
-      _finish();
+      // الفيديو غير موجود أو تالف: ندخل التطبيق دون تسجيله كمشاهَد
+      _finish(markSeen: false);
     }
   }
 
-  Future<void> _finish() async {
+  Future<void> _finish({required bool markSeen}) async {
     if (_done || !mounted) return;
     _done = true;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('intro_seen', true);
+    if (markSeen || _played) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_introKey, true);
+    }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeShell()));
@@ -109,7 +120,7 @@ class _SplashScreenState extends State<SplashScreen> {
                     foregroundColor: C.gold,
                     side: const BorderSide(color: C.gold),
                     backgroundColor: Colors.black54),
-                onPressed: _finish,
+                onPressed: () => _finish(markSeen: true),
                 child: const Text('تخطي'),
               ),
             ),
