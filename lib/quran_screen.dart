@@ -9,9 +9,40 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'colors.dart';
 
-const String kSuwarApi = 'https://mp3quran.net/api/v3/suwar?language=ar';
-const String kRecitersApi = 'https://mp3quran.net/api/v3/reciters?language=ar';
-const String kReciterKeyword = 'مسعد'; // عبد الرحمن مسعد
+const _recitersUrls = [
+  'https://mp3quran.net/api/v3/reciters?language=ar',
+  'https://www.mp3quran.net/api/v3/reciters?language=ar',
+  'https://mp3quran.net/api/v3/reciters?language=eng',
+];
+const _headers = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Rawdah/1.0',
+  'Accept': 'application/json',
+};
+
+const kSurahNames = [
+  'الفاتحة','البقرة','آل عمران','النساء','المائدة','الأنعام','الأعراف','الأنفال','التوبة','يونس',
+  'هود','يوسف','الرعد','إبراهيم','الحجر','النحل','الإسراء','الكهف','مريم','طه',
+  'الأنبياء','الحج','المؤمنون','النور','الفرقان','الشعراء','النمل','القصص','العنكبوت','الروم',
+  'لقمان','السجدة','الأحزاب','سبأ','فاطر','يس','الصافات','ص','الزمر','غافر',
+  'فصلت','الشورى','الزخرف','الدخان','الجاثية','الأحقاف','محمد','الفتح','الحجرات','ق',
+  'الذاريات','الطور','النجم','القمر','الرحمن','الواقعة','الحديد','المجادلة','الحشر','الممتحنة',
+  'الصف','الجمعة','المنافقون','التغابن','الطلاق','التحريم','الملك','القلم','الحاقة','المعارج',
+  'نوح','الجن','المزمل','المدثر','القيامة','الإنسان','المرسلات','النبأ','النازعات','عبس',
+  'التكوير','الانفطار','المطففين','الانشقاق','البروج','الطارق','الأعلى','الغاشية','الفجر','البلد',
+  'الشمس','الليل','الضحى','الشرح','التين','العلق','القدر','البينة','الزلزلة','العاديات',
+  'القارعة','التكاثر','العصر','الهمزة','الفيل','قريش','الماعون','الكوثر','الكافرون','النصر',
+  'المسد','الإخلاص','الفلق','الناس',
+];
+
+bool _isMsaad(String name) {
+  final n = name.replaceAll(' ', '').replaceAll('ـ', '').toLowerCase();
+  return n.contains('مسعد') ||
+      n.contains('msaad') ||
+      n.contains('masaad') ||
+      n.contains('massad') ||
+      n.contains('mosaad') ||
+      n.contains('msad');
+}
 
 class QuranScreen extends StatefulWidget {
   const QuranScreen({super.key});
@@ -21,14 +52,14 @@ class QuranScreen extends StatefulWidget {
 
 class _QuranScreenState extends State<QuranScreen> {
   final _player = AudioPlayer();
-  final _dio = Dio();
-  List<String> _names = [];
+  final _dio = Dio(BaseOptions(headers: _headers));
   Set<int> _available = {};
   final Set<int> _downloaded = {};
   final Map<int, double> _progress = {};
   String _server = '', _reciter = '';
+  String? _problem;
+  bool _loading = true;
   int? _playing;
-  String? _error;
   late Directory _dir;
 
   @override
@@ -47,55 +78,74 @@ class _QuranScreenState extends State<QuranScreen> {
   File _file(int n) => File('${_dir.path}/masaad_${_id(n)}.mp3');
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _problem = null;
+    });
     final docs = await getApplicationDocumentsDirectory();
     _dir = Directory('${docs.path}/quran');
     if (!await _dir.exists()) await _dir.create(recursive: true);
     final prefs = await SharedPreferences.getInstance();
 
-    // أسماء السور
-    try {
-      final r = await http.get(Uri.parse(kSuwarApi)).timeout(const Duration(seconds: 12));
-      final list = (jsonDecode(utf8.decode(r.bodyBytes))['suwar'] as List)
-          .map((e) => e['name'].toString()).toList();
-      if (list.length == 114) {
-        _names = list;
-        await prefs.setStringList('surah_names', list);
-      }
-    } catch (_) {}
-    if (_names.isEmpty) _names = prefs.getStringList('surah_names') ?? [];
-
-    // القارئ عبد الرحمن مسعد
-    try {
-      final r = await http.get(Uri.parse(kRecitersApi)).timeout(const Duration(seconds: 15));
-      final reciters = jsonDecode(utf8.decode(r.bodyBytes))['reciters'] as List;
-      final rec = reciters.firstWhere(
-          (e) => e['name'].toString().contains(kReciterKeyword), orElse: () => null);
-      if (rec != null) {
-        final moshafs = (rec['moshaf'] as List)..sort(
-            (a, b) => (b['surah_total'] as int).compareTo(a['surah_total'] as int));
+    String lastError = '';
+    for (final url in _recitersUrls) {
+      try {
+        final r = await http
+            .get(Uri.parse(url), headers: _headers)
+            .timeout(const Duration(seconds: 25));
+        if (r.statusCode != 200) {
+          lastError = 'رمز الاستجابة ${r.statusCode}';
+          continue;
+        }
+        final reciters = jsonDecode(utf8.decode(r.bodyBytes))['reciters'] as List;
+        Map? rec;
+        for (final e in reciters) {
+          if (_isMsaad(e['name'].toString())) {
+            rec = e as Map;
+            break;
+          }
+        }
+        if (rec == null) {
+          lastError = 'لم يُعثر على القارئ في القائمة';
+          continue;
+        }
+        final moshafs = List<Map>.from((rec['moshaf'] as List).map((m) => Map.from(m)));
+        moshafs.sort((a, b) => (int.tryParse('${b['surah_total']}') ?? 0)
+            .compareTo(int.tryParse('${a['surah_total']}') ?? 0));
         final m = moshafs.first;
         var server = m['server'].toString();
         if (!server.endsWith('/')) server += '/';
-        await prefs.setString('rec_name', rec['name'].toString());
+        await prefs.setString('rec_name', 'عبد الرحمن مسعد');
         await prefs.setString('rec_server', server);
         await prefs.setString('rec_list', m['surah_list'].toString());
+        lastError = '';
+        break;
+      } catch (e) {
+        lastError = e.toString();
       }
-    } catch (_) {}
+    }
+
     _reciter = prefs.getString('rec_name') ?? '';
     _server = prefs.getString('rec_server') ?? '';
     _available = (prefs.getString('rec_list') ?? '')
-        .split(',').where((e) => e.isNotEmpty).map(int.parse).toSet();
+        .split(',')
+        .where((e) => e.trim().isNotEmpty)
+        .map((e) => int.tryParse(e.trim()) ?? 0)
+        .where((e) => e > 0)
+        .toSet();
 
-    if (_names.isEmpty || _server.isEmpty) {
-      _error = 'تعذّر تحميل البيانات. اتصل بالإنترنت لأول مرة.';
+    if (_server.isEmpty) {
+      _problem = 'تعذّر الوصول لخادم التلاوات.\nالسبب: $lastError\n'
+          'جرّب إيقاف الـ VPN ثم اضغط إعادة المحاولة.';
     }
     for (var n = 1; n <= 114; n++) {
       if (await _file(n).exists()) _downloaded.add(n);
     }
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _playOnline(int n) async {
+    if (_server.isEmpty) return _snack('خادم التلاوات غير متاح. اضغط إعادة المحاولة.');
     try {
       await _player.setUrl('$_server${_id(n)}.mp3');
       setState(() => _playing = n);
@@ -116,15 +166,17 @@ class _QuranScreenState extends State<QuranScreen> {
   }
 
   Future<void> _download(int n) async {
+    if (_server.isEmpty) return _snack('خادم التلاوات غير متاح. اضغط إعادة المحاولة.');
     setState(() => _progress[n] = 0);
     final tmp = '${_file(n).path}.part';
     try {
-      await _dio.download('$_server${_id(n)}.mp3', tmp, onReceiveProgress: (r, t) {
+      await _dio.download('$_server${_id(n)}.mp3', tmp,
+          onReceiveProgress: (r, t) {
         if (t > 0 && mounted) setState(() => _progress[n] = r / t);
       });
       await File(tmp).rename(_file(n).path);
       _downloaded.add(n);
-      _snack('تم تنزيل سورة ${_names[n - 1]}');
+      _snack('تم تنزيل سورة ${kSurahNames[n - 1]}');
     } catch (_) {
       _snack('فشل التنزيل.');
       if (await File(tmp).exists()) await File(tmp).delete();
@@ -146,29 +198,30 @@ class _QuranScreenState extends State<QuranScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('القرآن الكريم')),
-      body: _names.isEmpty || _server.isEmpty
-          ? Center(
-              child: _error != null
-                  ? Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Text(_error!, textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        ElevatedButton(onPressed: () { setState(() => _error = null); _load(); },
-                            child: const Text('إعادة المحاولة')),
-                      ]))
-                  : const CircularProgressIndicator(color: C.gold))
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: C.gold))
           : Column(children: [
               Container(
                 width: double.infinity,
                 color: C.navy,
                 padding: const EdgeInsets.all(8),
-                child: Text('القارئ: $_reciter',
-                    textAlign: TextAlign.center, style: const TextStyle(color: C.gold)),
+                child: _problem == null
+                    ? Text('القارئ: $_reciter',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: C.gold))
+                    : Column(children: [
+                        Text(_problem!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+                        TextButton(
+                            onPressed: _load,
+                            child: const Text('إعادة المحاولة',
+                                style: TextStyle(color: C.gold))),
+                      ]),
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: _names.length,
+                  itemCount: 114,
                   itemBuilder: (_, i) {
                     final n = i + 1;
                     final ok = _available.isEmpty || _available.contains(n);
@@ -180,28 +233,33 @@ class _QuranScreenState extends State<QuranScreen> {
                         leading: CircleAvatar(
                             backgroundColor: C.navy,
                             child: Text('$n', style: const TextStyle(color: C.gold))),
-                        title: Text(_names[i],
+                        title: Text(kSurahNames[i],
                             style: GoogleFonts.amiriQuran(
                                 fontSize: 22, color: _playing == n ? C.gold : C.white)),
                         subtitle: prog != null
                             ? LinearProgressIndicator(value: prog, color: C.gold)
-                            : (!ok ? const Text('غير متوفرة لهذا القارئ',
-                                style: TextStyle(fontSize: 11, color: Colors.white38)) : null),
-                        trailing: !ok
+                            : (!ok
+                                ? const Text('غير متوفرة لهذا القارئ',
+                                    style: TextStyle(fontSize: 11, color: Colors.white38))
+                                : null),
+                        trailing: (!ok && !has)
                             ? null
                             : Row(mainAxisSize: MainAxisSize.min, children: [
-                                IconButton(
-                                    tooltip: 'استماع بالإنترنت',
-                                    icon: const Icon(Icons.play_circle, color: C.gold),
-                                    onPressed: () => _playOnline(n)),
+                                if (ok)
+                                  IconButton(
+                                      tooltip: 'استماع بالإنترنت',
+                                      icon: const Icon(Icons.play_circle, color: C.gold),
+                                      onPressed: () => _playOnline(n)),
                                 if (has) ...[
                                   IconButton(
                                       tooltip: 'تشغيل بدون إنترنت',
-                                      icon: const Icon(Icons.offline_pin, color: Colors.greenAccent),
+                                      icon: const Icon(Icons.offline_pin,
+                                          color: Colors.greenAccent),
                                       onPressed: () => _playOffline(n)),
                                   IconButton(
                                       tooltip: 'حذف التنزيل',
-                                      icon: const Icon(Icons.delete_outline, color: Colors.white54),
+                                      icon: const Icon(Icons.delete_outline,
+                                          color: Colors.white54),
                                       onPressed: () => _delete(n)),
                                 ] else
                                   IconButton(
@@ -214,7 +272,9 @@ class _QuranScreenState extends State<QuranScreen> {
                   },
                 ),
               ),
-              _PlayerBar(player: _player, title: _playing == null ? null : _names[_playing! - 1]),
+              _PlayerBar(
+                  player: _player,
+                  title: _playing == null ? null : kSurahNames[_playing! - 1]),
             ]),
     );
   }
