@@ -29,14 +29,42 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Regenerate android project & configure Gradle
+      - name: Regenerate android project & Fix Gradle Specs
         run: |
           rm -rf android
           flutter create . --platforms=android --org com.azzoom --project-name rawdah
           
-          # Fix compileSdkVersion and targetSdkVersion for packages like geolocator
-          sed -i 's/compileSdk = .*/compileSdk = 34/' android/app/build.gradle || true
-          sed -i 's/compileSdkVersion .*/compileSdkVersion 34/' android/app/build.gradle || true
+          # Fix compileSdk / targetSdk & Naming
+          cat << 'EOF' > android/app/build.gradle
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          android {
+              namespace "com.azzoom.rawdah"
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.azzoom.rawdah"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+          }
+
+          flutter {
+              source '../..'
+          }
+          EOF
 
       - name: Ensure assets exist
         run: |
@@ -70,5 +98,4 @@ jobs:
         with:
           name: rawdah-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-
-
+          
