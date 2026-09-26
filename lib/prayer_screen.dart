@@ -328,7 +328,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
                 Wrap(spacing: 8, children: [
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
-                      label: const Text('منصة روضة @hii0i5'),
+                      label: const Text('منصة روضة @raw.da_h'),
                       onPressed: () => _open('hii0i5')),
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
