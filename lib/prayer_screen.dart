@@ -329,7 +329,7 @@ class _PrayerScreenState extends State<PrayerScreen> {
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
                       label: const Text('منصة روضة @raw.da_h'),
-                      onPressed: () => _open('hii0i5')),
+                      onPressed: () => _open('raw.da_h')),
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
                       label: const Text('المطوّر @az_zoom_'),
