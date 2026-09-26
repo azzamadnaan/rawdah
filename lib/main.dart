@@ -34,7 +34,6 @@ class RawdahApp extends StatelessWidget {
       );
 }
 
-/// الفيديو يظهر مرة واحدة فقط، ولا يُسجَّل كمشاهَد إلا إذا عُرض فعلاً.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -71,7 +70,6 @@ class _SplashScreenState extends State<SplashScreen> {
       _played = true;
       await vc.play();
     } catch (_) {
-      // الفيديو غير موجود أو تالف: ندخل التطبيق دون تسجيله كمشاهَد
       _finish(markSeen: false);
     }
   }
