@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'colors.dart';
+import 'prayer_notifications.dart';
 
 enum _St { loading, needPermission, needGps, error, ready }
 
@@ -33,10 +34,12 @@ class _PrayerScreenState extends State<PrayerScreen> {
   int _loadedDay = 0;
   DateTime _now = DateTime.now();
   Timer? _timer;
+  bool _notifOn = true;
 
   @override
   void initState() {
     super.initState();
+    _loadNotifPref();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
@@ -51,14 +54,27 @@ class _PrayerScreenState extends State<PrayerScreen> {
     super.dispose();
   }
 
+  Future<void> _loadNotifPref() async {
+    final v = await notificationsEnabled();
+    if (mounted) setState(() => _notifOn = v);
+  }
+
+  Future<void> _toggleNotif() async {
+    final v = !_notifOn;
+    await setNotificationsEnabled(v);
+    if (mounted) setState(() => _notifOn = v);
+    if (v && _st == _St.ready) {
+      await scheduleAdhanNotifications(today: _today, tomorrow: _tomorrow);
+    }
+  }
+
   String _two(int n) => n.toString().padLeft(2, '0');
 
-  /// اسم المدينة الفعلي من إحداثيات المستخدم (خدمة مجانية بدون مفتاح).
   Future<String> _cityName(double lat, double lng, SharedPreferences prefs) async {
     final key = 'city_${lat.toStringAsFixed(2)}_${lng.toStringAsFixed(2)}';
     try {
-      final r = await http.get(Uri.parse(
-              'https://api.bigdatacloud.net/data/reverse-geocode-client'
+      final r = await http
+          .get(Uri.parse('https://api.bigdatacloud.net/data/reverse-geocode-client'
               '?latitude=$lat&longitude=$lng&localityLanguage=ar'))
           .timeout(const Duration(seconds: 10));
       if (r.statusCode == 200) {
@@ -162,6 +178,9 @@ class _PrayerScreenState extends State<PrayerScreen> {
       _loadedDay = DateTime.now().day;
       _st = _St.ready;
     });
+    if (_notifOn) {
+      await scheduleAdhanNotifications(today: _today, tomorrow: _tomorrow);
+    }
   }
 
   DateTime _dt(DateTime d, String hm) {
@@ -238,7 +257,17 @@ class _PrayerScreenState extends State<PrayerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مواقيت الصلاة')),
+      appBar: AppBar(
+        title: const Text('مواقيت الصلاة'),
+        actions: [
+          IconButton(
+            tooltip: _notifOn ? 'إيقاف تنبيه الأذان' : 'تفعيل تنبيه الأذان',
+            icon: Icon(_notifOn ? Icons.notifications_active : Icons.notifications_off,
+                color: C.gold),
+            onPressed: _toggleNotif,
+          ),
+        ],
+      ),
       body: _st != _St.ready ? _stateView() : _ready(),
     );
   }
@@ -282,6 +311,14 @@ class _PrayerScreenState extends State<PrayerScreen> {
               child: Text('طريقة الحساب: $_method',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.white38, fontSize: 11))),
+          if (!_notifOn)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Center(
+                child: Text('تنبيه الأذان مُعطَّل حالياً',
+                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+              ),
+            ),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(20),
@@ -328,8 +365,8 @@ class _PrayerScreenState extends State<PrayerScreen> {
                 Wrap(spacing: 8, children: [
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
-                      label: const Text('منصة روضة @raw.da_h'),
-                      onPressed: () => _open('raw.da_h')),
+                      label: const Text('منصة روضة @hii0i5'),
+                      onPressed: () => _open('hii0i5')),
                   ActionChip(
                       avatar: const Icon(Icons.camera_alt, color: C.gold, size: 18),
                       label: const Text('المطوّر @az_zoom_'),
@@ -346,6 +383,11 @@ class _PrayerScreenState extends State<PrayerScreen> {
           const Text(kRightsNote,
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const SizedBox(height: 4),
+          const Text(
+              'إن لم يعمل التنبيه على هاتفك، استثنِ التطبيق من "توفير البطارية" في إعدادات هاتفك.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white24, fontSize: 10)),
           const SizedBox(height: 12),
         ],
       ),
