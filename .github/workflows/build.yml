@@ -70,6 +70,9 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
           """
           if "ACCESS_FINE_LOCATION" not in s:
               i = s.index(">", s.index("<manifest")) + 1
@@ -82,9 +85,19 @@ jobs:
 
       - name: Ensure assets exist
         run: |
-          mkdir -p assets/videos assets/data
+          mkdir -p assets/videos assets/data assets/audio
           [ -f assets/data/messages.json ] || echo '["قال تعالى: ﴿ألا بذكر الله تطمئن القلوب﴾"]' > assets/data/messages.json
           [ -f assets/videos/welcome.mp4 ] || touch assets/videos/welcome.mp4
+
+      - name: Copy adhan sound to Android raw resources
+        run: |
+          mkdir -p android/app/src/main/res/raw
+          if [ -f assets/audio/adhan.mp3 ]; then
+            cp assets/audio/adhan.mp3 android/app/src/main/res/raw/adhan.mp3
+            echo "تم نسخ صوت الأذان."
+          else
+            echo "تحذير: لم يُرفع assets/audio/adhan.mp3، سيستخدم صوت النظام الافتراضي."
+          fi
 
       - name: Get dependencies
         run: flutter pub get
