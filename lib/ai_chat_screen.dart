@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'colors.dart';
 
-// تُمرَّر عند البناء من GitHub Secrets (لا تكتب المفتاح هنا)
 const String _kKey = String.fromEnvironment('GEMINI_API_KEY');
 const String _kBaseEnv = String.fromEnvironment('GEMINI_BASE_URL');
 const String _kDefaultBase = 'https://generativelanguage.googleapis.com';
@@ -13,7 +12,6 @@ String get _base {
   return b.endsWith('/') ? b.substring(0, b.length - 1) : b;
 }
 
-// أسماء مستعارة تبقى صالحة عند تحديث Google لإصداراتها
 const _geminiModels = [
   'gemini-flash-lite-latest',
   'gemini-flash-latest',
@@ -29,8 +27,9 @@ const String kSystem =
 class _Msg {
   final String text;
   final bool user;
-  final String? note; // سبب استخدام الرد المحلي
-  _Msg(this.text, this.user, {this.note});
+  final String? note;
+  final String? imageUrl;
+  _Msg(this.text, this.user, {this.note, this.imageUrl});
 }
 
 class AiChatScreen extends StatefulWidget {
@@ -43,7 +42,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final _ctrl = TextEditingController();
   final _scroll = ScrollController();
   final List<_Msg> _msgs = [
-    _Msg('السلام عليكم ورحمة الله وبركاته، أنا روضة. اسألني في أمور دينك وسأجيبك بما أستطيع.', false)
+    _Msg('السلام عليكم ورحمة الله وبركاته، أنا روضة. اسألني في أمور دينك، أو اطلب مني رسم صورة (زخرفة، طبيعة، مسجد...) بالضغط على أيقونة الصورة.', false)
   ];
   bool _busy = false;
   String _lastError = '';
@@ -65,14 +64,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
         'للمسائل الفقهية أنصحك بسؤال أهل العلم الموثوقين.';
   }
 
-  /// Gemini: يجرّب النماذج بالترتيب.
   Future<String?> _gemini(List<_Msg> hist) async {
     final usable = _kKey.isNotEmpty || _kBaseEnv.trim().isNotEmpty;
     if (!usable) {
       _lastError = 'المفتاح غير مضبوط في البناء';
       return null;
     }
-    // Gemini يشترط أن تبدأ المحادثة برسالة مستخدم
     final turns = hist.skipWhile((m) => !m.user).toList();
     final contents = [
       for (final m in turns)
@@ -111,7 +108,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
           _lastError = 'رد فارغ (قد يكون حُجب)';
         } else {
           _lastError = 'Gemini ${r.statusCode}';
-          if (r.statusCode == 400 || r.statusCode == 403) break; // مفتاح/منطقة
+          if (r.statusCode == 400 || r.statusCode == 403) break;
         }
       } catch (e) {
         _lastError = 'تعذّر الاتصال';
@@ -120,7 +117,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
     return null;
   }
 
-  /// احتياط مفتوح بلا مفتاح
   Future<String?> _backup(List<_Msg> hist) async {
     try {
       final r = await http
@@ -167,6 +163,31 @@ class _AiChatScreenState extends State<AiChatScreen> {
       _msgs.add(a);
       _busy = false;
     });
+    _scrollDown();
+  }
+
+  /// توليد صورة مجاناً بلا مفتاح عبر Pollinations.
+  Future<void> _generateImage() async {
+    final q = _ctrl.text.trim();
+    if (q.isEmpty || _busy) return;
+    _ctrl.clear();
+    setState(() {
+      _msgs.add(_Msg('🎨 رسم: $q', true));
+      _busy = true;
+    });
+    final prompt = Uri.encodeComponent(
+        '$q, islamic art style, no human faces, tasteful, high quality');
+    final url =
+        'https://image.pollinations.ai/prompt/$prompt?width=768&height=768&nologo=true&seed=${DateTime.now().millisecondsSinceEpoch}';
+    if (!mounted) return;
+    setState(() {
+      _msgs.add(_Msg('', false, imageUrl: url));
+      _busy = false;
+    });
+    _scrollDown();
+  }
+
+  void _scrollDown() async {
     await Future.delayed(const Duration(milliseconds: 100));
     if (_scroll.hasClients) {
       _scroll.animateTo(_scroll.position.maxScrollExtent,
@@ -183,7 +204,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
             color: const Color(0xFF3A2F0B),
             padding: const EdgeInsets.all(10),
             child: const Text(
-              'تنبيه: الإجابات إرشادية وتثقيفية وليست فتوى شرعية معتمدة.',
+              'تنبيه: الإجابات إرشادية وتثقيفية وليست فتوى شرعية معتمدة، والصور تُولَّد آلياً فقد تحتوي أخطاء.',
               textAlign: TextAlign.center,
               style: TextStyle(color: C.gold, fontSize: 13),
             ),
@@ -208,7 +229,26 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       border: m.user ? Border.all(color: C.gold, width: 0.8) : null,
                     ),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      SelectableText(m.text, style: const TextStyle(height: 1.6)),
+                      if (m.imageUrl != null)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(
+                            m.imageUrl!,
+                            loadingBuilder: (c, w, p) => p == null
+                                ? w
+                                : const SizedBox(
+                                    height: 180,
+                                    child: Center(
+                                        child: CircularProgressIndicator(color: C.gold))),
+                            errorBuilder: (c, e, s) => const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text('تعذّر توليد الصورة. حاول مجدداً.',
+                                  style: TextStyle(color: Colors.white54)),
+                            ),
+                          ),
+                        )
+                      else
+                        SelectableText(m.text, style: const TextStyle(height: 1.6)),
                       if (m.note != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
@@ -231,7 +271,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     controller: _ctrl,
                     onSubmitted: (_) => _send(),
                     decoration: InputDecoration(
-                      hintText: 'اكتب سؤالك...',
+                      hintText: 'اكتب سؤالك أو وصف صورة...',
                       filled: true,
                       fillColor: C.card,
                       border: OutlineInputBorder(
@@ -241,6 +281,11 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 6),
+                IconButton(
+                  tooltip: 'توليد صورة من النص',
+                  onPressed: _busy ? null : _generateImage,
+                  icon: const Icon(Icons.image, color: C.gold),
+                ),
                 CircleAvatar(
                   backgroundColor: C.gold,
                   child: IconButton(icon: const Icon(Icons.send, color: C.bg), onPressed: _send),
