@@ -8,11 +8,13 @@ import 'ai_chat_screen.dart';
 import 'athkar_screen.dart';
 import 'quran_screen.dart';
 import 'daily_messages_screen.dart';
+import 'prayer_notifications.dart';
 
 const _introKey = 'intro_seen_v2';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initNotifications();
   runApp(const RawdahApp());
 }
 
