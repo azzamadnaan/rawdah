@@ -44,6 +44,7 @@ class _SplashScreenState extends State<SplashScreen> {
   VideoPlayerController? _vc;
   bool _done = false;
   bool _played = false;
+  String? _error;
 
   @override
   void initState() {
@@ -56,7 +57,10 @@ class _SplashScreenState extends State<SplashScreen> {
     if (prefs.getBool(_introKey) ?? false) return _finish(markSeen: false);
     try {
       final vc = VideoPlayerController.asset('assets/videos/welcome.mp4');
-      await vc.initialize().timeout(const Duration(seconds: 8));
+      await vc.initialize().timeout(const Duration(seconds: 10));
+      if (vc.value.duration <= Duration.zero) {
+        throw Exception('الفيديو صفر ثانية أو تالف');
+      }
       vc.addListener(() {
         final v = vc.value;
         if (v.isInitialized &&
@@ -69,8 +73,8 @@ class _SplashScreenState extends State<SplashScreen> {
       setState(() => _vc = vc);
       _played = true;
       await vc.play();
-    } catch (_) {
-      _finish(markSeen: false);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 
@@ -105,6 +109,23 @@ class _SplashScreenState extends State<SplashScreen> {
                 width: vc.value.size.width,
                 height: vc.value.size.height,
                 child: VideoPlayer(vc)),
+          )
+        else if (_error != null)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.error_outline, color: Colors.orangeAccent, size: 48),
+                const SizedBox(height: 12),
+                Text('تعذّر تشغيل الفيديو:\n$_error',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70)),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                    onPressed: () => _finish(markSeen: false),
+                    child: const Text('الدخول للتطبيق')),
+              ]),
+            ),
           )
         else
           const Center(child: CircularProgressIndicator(color: C.gold)),
