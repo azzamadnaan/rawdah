@@ -24,8 +24,8 @@ const kSurahNames = [
 ];
 
 /// السور الموثّقة فعلياً بصوت عبد الرحمن مسعد (12 سورة فقط، مصدرها Internet Archive).
-/// لا توجد لهذا القارئ حتى الآن واجهة برمجية بمصحف كامل.
-const _mosaadBase = 'https://ia904706.us.archive.org/13/items/010_20221110';
+/// رابط archive.org الرسمي يعيد التوجيه تلقائياً لأقرب خادم متاح.
+const _mosaadBase = 'https://archive.org/download/010_20221110';
 const Map<int, String> _mosaadSurahs = {
   10: '$_mosaadBase/010.mp3',
   19: '$_mosaadBase/019.mp3',
@@ -125,7 +125,6 @@ class _FullMushafState extends State<_FullMushaf> {
           continue;
         }
         final reciters = jsonDecode(utf8.decode(r.bodyBytes))['reciters'] as List;
-        // نبحث أولاً عن قارئ يملك مصحفاً مرتلاً كاملاً (114 سورة)
         Map? best;
         Map? bestMoshaf;
         for (final e in reciters) {
@@ -178,8 +177,8 @@ class _FullMushafState extends State<_FullMushaf> {
       await _player.setUrl('$_server${_id(n)}.mp3');
       setState(() => _playing = n);
       await _player.play();
-    } catch (_) {
-      _snack('تعذّر التشغيل. تحقق من الإنترنت.');
+    } catch (e) {
+      _snack('تعذّر التشغيل: $e');
     }
   }
 
@@ -204,8 +203,8 @@ class _FullMushafState extends State<_FullMushaf> {
       await File(tmp).rename(_file(n).path);
       _downloaded.add(n);
       _snack('تم تنزيل سورة ${kSurahNames[n - 1]}');
-    } catch (_) {
-      _snack('فشل التنزيل.');
+    } catch (e) {
+      _snack('فشل التنزيل: $e');
       if (await File(tmp).exists()) await File(tmp).delete();
     }
     if (mounted) setState(() => _progress.remove(n));
@@ -343,8 +342,8 @@ class _MosaadTabState extends State<_MosaadTab> {
       await _player.setUrl(_mosaadSurahs[n]!);
       setState(() => _playing = n);
       await _player.play();
-    } catch (_) {
-      _snack('تعذّر التشغيل. تحقق من الإنترنت.');
+    } catch (e) {
+      _snack('تعذّر التشغيل: $e');
     }
   }
 
@@ -362,14 +361,17 @@ class _MosaadTabState extends State<_MosaadTab> {
     setState(() => _progress[n] = 0);
     final tmp = '${_file(n).path}.part';
     try {
-      await _dio.download(_mosaadSurahs[n]!, tmp, onReceiveProgress: (r, t) {
+      await _dio.download(_mosaadSurahs[n]!, tmp,
+          options: Options(headers: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Rawdah/1.0',
+          }), onReceiveProgress: (r, t) {
         if (t > 0 && mounted) setState(() => _progress[n] = r / t);
       });
       await File(tmp).rename(_file(n).path);
       _downloaded.add(n);
       _snack('تم تنزيل سورة ${kSurahNames[n - 1]}');
-    } catch (_) {
-      _snack('فشل التنزيل.');
+    } catch (e) {
+      _snack('فشل التنزيل: $e');
       if (await File(tmp).exists()) await File(tmp).delete();
     }
     if (mounted) setState(() => _progress.remove(n));
@@ -395,7 +397,7 @@ class _MosaadTabState extends State<_MosaadTab> {
         color: C.navy,
         padding: const EdgeInsets.all(10),
         child: const Text(
-          'هذا القارئ الشاب لم يسجّل مصحفاً كاملاً بعد. المتوفر حالياً ${12} سورة موثّقة فقط.',
+          'هذا القارئ الشاب لم يسجّل مصحفاً كاملاً بعد. المتوفر حالياً 12 سورة موثّقة فقط.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
         ),
